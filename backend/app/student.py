@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import text
 
-from database import engine
-from auth_dependencies import get_current_user
+from app.database import engine
+from app.auth_dependencies import get_current_user
 
 
 router = APIRouter(
@@ -257,19 +257,19 @@ def get_student_dashboard(
         student_result = connection.execute(
             text("""
                 SELECT
-                s.student_id,
-                s.first_name,
-                s.last_name,
-                s.email,
-                s.current_status,
-                b.batch_name,
-                b.course_name,
-                s.qualification,
-                s.graduation_year
+                    s.student_id,
+                    s.first_name,
+                    s.last_name,
+                    s.email,
+                    s.current_status,
+                    b.batch_name,
+                    b.course_name,
+                    s.qualification,
+                    s.graduation_year
                 FROM students s
                 JOIN batches b
-             ON s.batch_id = b.batch_id
-             WHERE s.user_id = :user_id
+                    ON s.batch_id = b.batch_id
+                WHERE s.user_id = :user_id
             """),
             {"user_id": user_id}
         )

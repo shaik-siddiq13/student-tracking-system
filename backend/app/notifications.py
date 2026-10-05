@@ -2,9 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from database import engine
-from auth_dependencies import get_current_user
-
+from app.database import engine
+from app.auth_dependencies import get_current_user
 
 router = APIRouter(
     prefix="/notifications",

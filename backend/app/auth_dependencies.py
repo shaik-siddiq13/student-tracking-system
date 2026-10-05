@@ -2,11 +2,19 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 
-from auth import SECRET_KEY, ALGORITHM
+from app.auth import SECRET_KEY, ALGORITHM
 
+
+# =========================================================
+# HTTP BEARER SECURITY
+# =========================================================
 
 security = HTTPBearer()
 
+
+# =========================================================
+# GET CURRENT USER
+# =========================================================
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
