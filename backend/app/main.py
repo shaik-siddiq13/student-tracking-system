@@ -29,7 +29,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://ttt-nexgen-tracker.vercel.app"
+        "https://ttt-nexgen-tracker.vercel.app",
+        "https://ttt-nexgen-tracker-d7ibpxwff-sk-1b95.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -132,3 +133,4 @@ app.include_router(
 app.include_router(
     notifications_router
 )
+
