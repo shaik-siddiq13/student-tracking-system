@@ -9,123 +9,272 @@ const AuthContext = createContext(null);
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+
+// =====================================================
+// GET SAVED USER
+// =====================================================
+
+function getSavedUser() {
+  try {
+    const savedUser = localStorage.getItem("user");
+
+    if (!savedUser) {
+      return null;
+    }
+
+    return JSON.parse(savedUser);
+
+  } catch (error) {
+    console.error(
+      "Unable to parse saved user:",
+      error
+    );
+
+    localStorage.removeItem("user");
+
+    return null;
+  }
+}
+
+
+// =====================================================
+// AUTH PROVIDER
+// =====================================================
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+
+  const [user, setUser] = useState(
+    () => getSavedUser()
+  );
 
   const [token, setToken] = useState(
-    localStorage.getItem("access_token")
+    () =>
+      localStorage.getItem("access_token")
   );
 
   const [loading, setLoading] = useState(true);
+
 
   // =====================================================
   // LOGOUT
   // =====================================================
 
   const logout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("user");
+
+    localStorage.removeItem(
+      "access_token"
+    );
+
+    localStorage.removeItem(
+      "user"
+    );
 
     setToken(null);
     setUser(null);
   };
 
+
   // =====================================================
-  // LOAD USER
+  // LOAD AUTHENTICATED USER
   // =====================================================
 
   useEffect(() => {
+
+    let mounted = true;
+
     const loadUser = async () => {
+
       const savedToken =
-        localStorage.getItem("access_token");
+        localStorage.getItem(
+          "access_token"
+        );
+
+      const savedUser =
+        getSavedUser();
+
+
+      // =================================================
+      // NO TOKEN
+      // =================================================
 
       if (!savedToken) {
-        setLoading(false);
+
+        if (mounted) {
+
+          setToken(null);
+          setUser(null);
+          setLoading(false);
+        }
+
         return;
       }
 
+
+      // =================================================
+      // RESTORE SAVED USER IMMEDIATELY
+      // =================================================
+
+      if (mounted) {
+
+        setToken(savedToken);
+
+        if (savedUser) {
+          setUser(savedUser);
+        }
+      }
+
+
       try {
+
         // =================================================
-        // STEP 1
-        // GET AUTHENTICATED USER
+        // VERIFY TOKEN
         // =================================================
 
-        const meResponse = await fetch(
-          `${API_URL}/me`,
-          {
-            method: "GET",
+        const response =
+          await fetch(
+            `${API_URL}/me`,
+            {
+              method: "GET",
 
-            headers: {
-              Authorization: `Bearer ${savedToken}`,
-            },
-          }
-        );
+              headers: {
+                Authorization:
+                  `Bearer ${savedToken}`,
+              },
+            }
+          );
+
 
         // =================================================
         // INVALID TOKEN
         // =================================================
 
         if (
-          meResponse.status === 401 ||
-          meResponse.status === 403
+          response.status === 401 ||
+          response.status === 403
         ) {
-          logout();
+
+          if (mounted) {
+            logout();
+          }
+
           return;
         }
 
-        if (!meResponse.ok) {
+
+        // =================================================
+        // SERVER ERROR
+        // =================================================
+
+        if (!response.ok) {
+
           throw new Error(
-            "Unable to load authenticated user"
+            `Authentication request failed: ${response.status}`
           );
         }
 
+
+        // =================================================
+        // READ /me RESPONSE
+        // =================================================
+
         const meData =
-          await meResponse.json();
+          await response.json();
 
         console.log(
-          "Authenticated user:",
+          "Authenticated user response:",
           meData
         );
 
-        /*
-         * Backend /me response:
-         *
-         * {
-         *   "message": "You are authenticated",
-         *   "user": {
-         *      "user_id": 1,
-         *      "username": "siddiq",
-         *      "role": "STUDENT"
-         *   }
-         * }
-         */
+
+        // =================================================
+        // SUPPORT BOTH RESPONSE FORMATS
+        //
+        // Format 1:
+        // {
+        //   "user": {
+        //     "user_id": 1,
+        //     "username": "siddiq",
+        //     "role": "STUDENT"
+        //   }
+        // }
+        //
+        // Format 2:
+        // {
+        //   "user_id": 1,
+        //   "username": "siddiq",
+        //   "role": "STUDENT"
+        // }
+        // =================================================
 
         const authenticatedUser =
-          meData.user;
+          meData?.user || meData;
 
-        if (!authenticatedUser) {
+
+        console.log(
+          "FINAL AUTH USER:",
+          authenticatedUser
+        );
+
+
+        // =================================================
+        // VALIDATE USER
+        // =================================================
+
+        if (
+          !authenticatedUser ||
+          typeof authenticatedUser !== "object"
+        ) {
+
           throw new Error(
             "User information not found"
           );
         }
 
+
+        if (
+          authenticatedUser.user_id ===
+            undefined ||
+          authenticatedUser.user_id ===
+            null
+        ) {
+
+          throw new Error(
+            "User ID not found"
+          );
+        }
+
+
+        if (
+          authenticatedUser.role ===
+            undefined ||
+          authenticatedUser.role ===
+            null
+        ) {
+
+          throw new Error(
+            "User role not found"
+          );
+        }
+
+
         // =================================================
-        // STEP 2
-        // SAVE BASIC USER INFORMATION
+        // BUILD CURRENT USER
         // =================================================
 
         let currentUser = {
           ...authenticatedUser,
         };
 
+
         // =================================================
-        // STEP 3
-        // STUDENT USER
+        // STUDENT
         // =================================================
 
         if (
-          authenticatedUser.role === "STUDENT"
+          authenticatedUser.role ===
+          "STUDENT"
         ) {
+
           const studentResponse =
             await fetch(
               `${API_URL}/students/me`,
@@ -139,48 +288,92 @@ export function AuthProvider({ children }) {
               }
             );
 
+
+          // -----------------------------------------------
+          // INVALID TOKEN
+          // -----------------------------------------------
+
           if (
             studentResponse.status === 401 ||
             studentResponse.status === 403
           ) {
-            logout();
+
+            if (mounted) {
+              logout();
+            }
+
             return;
           }
 
+
+          // -----------------------------------------------
+          // SERVER ERROR
+          // -----------------------------------------------
+
           if (!studentResponse.ok) {
+
             throw new Error(
-              "Unable to load student information"
+              `Unable to load student information: ${studentResponse.status}`
             );
           }
+
+
+          // -----------------------------------------------
+          // READ STUDENT RESPONSE
+          // -----------------------------------------------
 
           const studentData =
             await studentResponse.json();
 
           console.log(
-            "Student profile:",
+            "Student response:",
             studentData
           );
 
-          /*
-           * Backend returns:
-           *
-           * {
-           *   "student": {
-           *      ...
-           *   }
-           * }
-           */
+
+          // =================================================
+          // SUPPORT BOTH STUDENT FORMATS
+          // =================================================
 
           const student =
-            studentData.student;
+            studentData?.student ||
+            studentData;
 
-          if (!student) {
+
+          // =================================================
+          // VALIDATE STUDENT
+          // =================================================
+
+          if (
+            !student ||
+            typeof student !== "object"
+          ) {
+
             throw new Error(
               "Student information not found"
             );
           }
 
+
+          if (
+            student.student_id ===
+              undefined ||
+            student.student_id ===
+              null
+          ) {
+
+            throw new Error(
+              "Student ID not found"
+            );
+          }
+
+
+          // =================================================
+          // MERGE STUDENT INFORMATION
+          // =================================================
+
           currentUser = {
+
             ...authenticatedUser,
 
             student,
@@ -220,68 +413,86 @@ export function AuthProvider({ children }) {
           };
         }
 
-        // =================================================
-        // STEP 4
-        // ADMIN USER
-        // =================================================
 
-        /*
-         * ADMIN does NOT call /students/me.
-         *
-         * The /me response is enough for admin:
-         *
-         * {
-         *   user_id: 2,
-         *   username: "admin",
-         *   role: "ADMIN"
-         * }
-         */
+        // =================================================
+        // ADMIN
+        // =================================================
 
         if (
-          authenticatedUser.role === "ADMIN"
+          authenticatedUser.role ===
+          "ADMIN"
         ) {
+
           currentUser = {
             ...authenticatedUser,
           };
         }
 
+
         // =================================================
-        // STEP 5
-        // SAVE USER
+        // SAVE FINAL USER
         // =================================================
 
-        setUser(currentUser);
+        if (mounted) {
 
-        localStorage.setItem(
-          "user",
-          JSON.stringify(currentUser)
-        );
+          setUser(currentUser);
 
-        console.log(
-          "Final current user:",
-          currentUser
-        );
+          setToken(savedToken);
+
+          localStorage.setItem(
+            "user",
+            JSON.stringify(
+              currentUser
+            )
+          );
+        }
+
 
       } catch (error) {
+
         console.error(
           "Authentication error:",
           error
         );
 
-        /*
-         * Do not immediately remove the token
-         * for normal server/network errors.
-         *
-         * This allows the application to recover
-         * if the backend temporarily has an issue.
-         */
+
+        // =================================================
+        // KEEP SAVED SESSION
+        // =================================================
+
+        if (mounted) {
+
+          if (savedUser) {
+
+            setUser(savedUser);
+
+          } else {
+
+            setUser(null);
+          }
+
+          setToken(savedToken);
+        }
+
+
       } finally {
-        setLoading(false);
+
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
+
     loadUser();
+
+
+    return () => {
+      mounted = false;
+    };
+
   }, []);
+
 
   // =====================================================
   // LOGIN
@@ -291,45 +502,53 @@ export function AuthProvider({ children }) {
     username,
     password
   ) => {
+
     try {
-      const response = await fetch(
-        `${API_URL}/login`,
-        {
-          method: "POST",
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
+      const response =
+        await fetch(
+          `${API_URL}/login`,
+          {
+            method: "POST",
 
-          body: JSON.stringify({
-            username,
-            password,
-          }),
-        }
-      );
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              username,
+              password,
+            }),
+          }
+        );
+
 
       const data =
         await response.json();
+
 
       // =================================================
       // LOGIN FAILED
       // =================================================
 
       if (!response.ok) {
+
         throw new Error(
           data.detail ||
           "Invalid username or password"
         );
       }
 
+
       console.log(
         "Login response:",
         data
       );
 
+
       // =================================================
-      // SAVE JWT
+      // SAVE TOKEN
       // =================================================
 
       localStorage.setItem(
@@ -337,16 +556,25 @@ export function AuthProvider({ children }) {
         data.access_token
       );
 
+
       // =================================================
-      // SAVE LOGIN USER
+      // GET USER
       // =================================================
 
-      if (data.user) {
+      const loginUser =
+        data?.user || null;
+
+
+      if (loginUser) {
+
         localStorage.setItem(
           "user",
-          JSON.stringify(data.user)
+          JSON.stringify(
+            loginUser
+          )
         );
       }
+
 
       // =================================================
       // UPDATE STATE
@@ -357,23 +585,28 @@ export function AuthProvider({ children }) {
       );
 
       setUser(
-        data.user || null
+        loginUser
       );
 
+
       return {
+
         success: true,
 
-        user:
-          data.user,
+        user: loginUser,
       };
 
+
     } catch (error) {
+
       console.error(
         "Login error:",
         error
       );
 
+
       return {
+
         success: false,
 
         error:
@@ -383,6 +616,7 @@ export function AuthProvider({ children }) {
     }
   };
 
+
   // =====================================================
   // AUTHENTICATED API REQUEST
   // =====================================================
@@ -391,46 +625,58 @@ export function AuthProvider({ children }) {
     endpoint,
     options = {}
   ) => {
+
     const currentToken =
       localStorage.getItem(
         "access_token"
       );
 
+
+    // =================================================
+    // NO TOKEN
+    // =================================================
+
     if (!currentToken) {
+
       throw new Error(
         "No authentication token found"
       );
     }
 
-    const response = await fetch(
-      `${API_URL}${endpoint}`,
-      {
-        ...options,
 
-        headers: {
-          ...(options.body
-            ? {
-                "Content-Type":
-                  "application/json",
-              }
-            : {}),
+    const response =
+      await fetch(
+        `${API_URL}${endpoint}`,
+        {
+          ...options,
 
-          ...(options.headers || {}),
+          headers: {
 
-          Authorization:
-            `Bearer ${currentToken}`,
-        },
-      }
-    );
+            ...(options.body
+              ? {
+                  "Content-Type":
+                    "application/json",
+                }
+              : {}),
+
+            ...(options.headers || {}),
+
+            Authorization:
+              `Bearer ${currentToken}`,
+          },
+        }
+      );
+
 
     // =================================================
-    // TOKEN EXPIRED / INVALID
+    // INVALID TOKEN
     // =================================================
 
     if (
       response.status === 401 ||
       response.status === 403
     ) {
+
       logout();
 
       throw new Error(
@@ -438,14 +684,17 @@ export function AuthProvider({ children }) {
       );
     }
 
+
     return response;
   };
+
 
   // =====================================================
   // CONTEXT VALUE
   // =====================================================
 
   const value = {
+
     user,
 
     token,
@@ -462,26 +711,39 @@ export function AuthProvider({ children }) {
     apiRequest,
   };
 
+
   return (
-    <AuthContext.Provider value={value}>
+
+    <AuthContext.Provider
+      value={value}
+    >
+
       {children}
+
     </AuthContext.Provider>
   );
 }
 
-// =======================================================
-// useAuth HOOK
-// =======================================================
+
+// =====================================================
+// useAuth
+// =====================================================
 
 export function useAuth() {
+
   const context =
-    useContext(AuthContext);
+    useContext(
+      AuthContext
+    );
+
 
   if (!context) {
+
     throw new Error(
       "useAuth must be used inside AuthProvider"
     );
   }
+
 
   return context;
 }
