@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 
 function StudentDashboard() {
-  const { apiRequest } = useAuth();
+  const { apiRequest, user } = useAuth();
 
   const [dashboard, setDashboard] = useState(null);
   const [interviews, setInterviews] = useState([]);
@@ -13,104 +13,141 @@ function StudentDashboard() {
   // LOAD DASHBOARD
   // =========================================================
 
+  useEffect(() => {
+    loadDashboard();
+  }, []);
+
   const loadDashboard = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const dashboardResponse = await apiRequest(
-        "/students/dashboard",
-        {
-          method: "GET",
-        }
+      const dashboardData = await apiRequest(
+        "/students/dashboard"
       );
 
-      const dashboardData = await dashboardResponse.json();
+      let interviewData = [];
 
-      if (!dashboardResponse.ok) {
-        throw new Error(
-          dashboardData.detail || "Failed to load dashboard"
+      try {
+        const response = await apiRequest(
+          "/students/interviews"
         );
-      }
 
-      const interviewsResponse = await apiRequest(
-        "/students/interviews",
-        {
-          method: "GET",
-        }
-      );
-
-      const interviewsData = await interviewsResponse.json();
-
-      if (!interviewsResponse.ok) {
-        throw new Error(
-          interviewsData.detail || "Failed to load interviews"
+        interviewData = Array.isArray(response)
+          ? response
+          : response?.interviews || [];
+      } catch (interviewError) {
+        console.warn(
+          "Interview list could not be loaded:",
+          interviewError
         );
       }
 
       setDashboard(dashboardData);
-
-      setInterviews(
-        Array.isArray(interviewsData.interviews)
-          ? interviewsData.interviews
-          : []
-      );
+      setInterviews(interviewData);
     } catch (err) {
-      console.error("Dashboard error:", err);
+      console.error(
+        "Dashboard loading error:",
+        err
+      );
 
       setError(
-        err.message || "Failed to load dashboard"
+        err?.message ||
+          "Unable to load dashboard information."
       );
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadDashboard();
-  }, []);
-
   // =========================================================
-  // DATE HELPERS
+  // NORMALIZE DATA
   // =========================================================
 
-  const getInterviewDate = (date) => {
-    if (!date) return null;
+  const student =
+    dashboard?.student ||
+    dashboard?.student_info ||
+    {};
 
-    const value = String(date);
-    const parts = value.split("-");
+  const performance =
+    dashboard?.performance ||
+    {};
 
-    if (parts.length !== 3) return null;
+  const interviewSummary =
+    dashboard?.interviews ||
+    {};
 
-    const year = Number(parts[0]);
-    const month = Number(parts[1]);
-    const day = Number(parts[2]);
+  const employment =
+    Array.isArray(dashboard?.employment)
+      ? dashboard.employment
+      : [];
 
-    if (
-      Number.isNaN(year) ||
-      Number.isNaN(month) ||
-      Number.isNaN(day)
-    ) {
-      return null;
-    }
+  // =========================================================
+  // INTERVIEW HELPERS
+  // =========================================================
 
-    const result = new Date(year, month - 1, day);
-    result.setHours(0, 0, 0, 0);
-
-    return result;
+  const getInterviewDate = (interview) => {
+    return (
+      interview?.interview_date ||
+      interview?.scheduled_date ||
+      interview?.date ||
+      interview?.interview_datetime ||
+      null
+    );
   };
 
-  const formatDate = (date) => {
-    if (!date) return "-";
+  const getCompanyName = (interview) => {
+    return (
+      interview?.company_name ||
+      interview?.company ||
+      interview?.companyName ||
+      "Company"
+    );
+  };
 
-    const interviewDate = getInterviewDate(date);
+  const getRole = (interview) => {
+    return (
+      interview?.role ||
+      interview?.job_role ||
+      interview?.position ||
+      "Data Engineer"
+    );
+  };
 
-    if (!interviewDate) {
-      return String(date);
+  const getStatus = (interview) => {
+    return (
+      interview?.status ||
+      interview?.interview_status ||
+      "SCHEDULED"
+    )
+      .toString()
+      .toUpperCase();
+  };
+
+  const getResult = (interview) => {
+    return (
+      interview?.result ||
+      interview?.selection_status ||
+      interview?.outcome ||
+      null
+    )
+      ?.toString()
+      .toUpperCase();
+  };
+
+  const formatDate = (dateValue) => {
+    if (!dateValue) {
+      return "Date not available";
     }
 
-    return interviewDate.toLocaleDateString(
-      "en-IN",
+    const date = new Date(dateValue);
+
+    if (Number.isNaN(date.getTime())) {
+      return dateValue;
+    }
+
+    return date.toLocaleDateString(
+      "en-GB",
       {
         day: "2-digit",
         month: "short",
@@ -119,214 +156,338 @@ function StudentDashboard() {
     );
   };
 
-  // =========================================================
-  // DATA
-  // =========================================================
+  const formatShortDate = (dateValue) => {
+    if (!dateValue) {
+      return "--";
+    }
 
-  const student = dashboard?.student || {};
-  const performance = dashboard?.performance || {};
+    const date = new Date(dateValue);
 
-  const employment = Array.isArray(dashboard?.employment)
-    ? dashboard.employment[0] || null
-    : dashboard?.employment || null;
+    if (Number.isNaN(date.getTime())) {
+      return dateValue;
+    }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const upcomingInterviews = interviews.filter((interview) => {
-    const date = getInterviewDate(interview.interview_date);
-
-    return date && date >= today;
-  });
-
-  const pastInterviews = interviews.filter((interview) => {
-    const date = getInterviewDate(interview.interview_date);
-
-    return date && date < today;
-  });
-
-  const scheduledInterviews = interviews.filter(
-    (interview) =>
-      String(interview.status || "").toUpperCase() === "SCHEDULED"
-  );
-
-  const attendedInterviews = interviews.filter(
-    (interview) =>
-      String(interview.status || "").toUpperCase() === "ATTENDED"
-  );
-
-  const completedInterviews = interviews.filter(
-    (interview) =>
-      String(interview.status || "").toUpperCase() === "COMPLETED"
-  );
-
-  const inProgressInterviews = interviews.filter(
-    (interview) =>
-      String(interview.status || "")
-        .toUpperCase()
-        .replace("_", " ") === "IN PROGRESS"
-  );
-
-  const selectedInterviews = interviews.filter((interview) => {
-    const result = String(
-      interview.result || ""
-    ).toUpperCase();
-
-    return (
-      result === "SELECTED" ||
-      result === "PASS" ||
-      result === "PASSED"
+    return date.toLocaleDateString(
+      "en-GB",
+      {
+        day: "2-digit",
+        month: "short",
+      }
     );
-  });
-
-  const rejectedInterviews = interviews.filter((interview) => {
-    const result = String(
-      interview.result || ""
-    ).toUpperCase();
-
-    return (
-      result === "REJECTED" ||
-      result === "FAIL" ||
-      result === "FAILED"
-    );
-  });
-
-  const sortedUpcoming = [...upcomingInterviews].sort(
-    (a, b) => {
-      const dateA = getInterviewDate(a.interview_date);
-      const dateB = getInterviewDate(b.interview_date);
-
-      if (!dateA) return 1;
-      if (!dateB) return -1;
-
-      return dateA - dateB;
-    }
-  );
-
-  const nextInterview =
-    sortedUpcoming.length > 0
-      ? sortedUpcoming[0]
-      : null;
-
-  // =========================================================
-  // STATUS HELPERS
-  // =========================================================
-
-  const getStatusStyle = (status) => {
-    const value = String(
-      status || ""
-    ).toUpperCase();
-
-    if (value === "SCHEDULED") {
-      return {
-        background: "#e0edff",
-        color: "#175cd3",
-      };
-    }
-
-    if (value === "ATTENDED") {
-      return {
-        background: "#dcfae6",
-        color: "#067647",
-      };
-    }
-
-    if (value === "COMPLETED") {
-      return {
-        background: "#f4ebff",
-        color: "#6941c6",
-      };
-    }
-
-    if (
-      value === "IN PROGRESS" ||
-      value === "IN_PROGRESS"
-    ) {
-      return {
-        background: "#fff4cc",
-        color: "#b54708",
-      };
-    }
-
-    return {
-      background: "#f2f4f7",
-      color: "#344054",
-    };
   };
 
-  const getResultStyle = (result) => {
-    const value = String(
-      result || ""
-    ).toUpperCase();
+  const getInitials = () => {
+    const first =
+      student?.first_name ||
+      user?.first_name ||
+      "";
 
-    if (
-      value === "SELECTED" ||
-      value === "PASS" ||
-      value === "PASSED"
-    ) {
-      return {
-        background: "#dcfae6",
-        color: "#067647",
-      };
-    }
+    const last =
+      student?.last_name ||
+      user?.last_name ||
+      "";
 
-    if (
-      value === "REJECTED" ||
-      value === "FAIL" ||
-      value === "FAILED"
-    ) {
-      return {
-        background: "#fee4e2",
-        color: "#b42318",
-      };
-    }
+    const initials =
+      `${first.charAt(0)}${last.charAt(0)}`
+        .toUpperCase();
 
-    return {
-      background: "#f2f4f7",
-      color: "#344054",
-    };
+    return initials || "S";
   };
 
   // =========================================================
-  // PERFORMANCE DATA
+  // CALCULATED VALUES
   // =========================================================
 
-  const skillScores = [
+  const overallScore =
+    Number(
+      performance?.overall_score ?? 0
+    );
+
+  const pythonScore =
+    Number(
+      performance?.python_score ?? 0
+    );
+
+  const sqlScore =
+    Number(
+      performance?.sql_score ?? 0
+    );
+
+  const pysparkScore =
+    Number(
+      performance?.pyspark_score ?? 0
+    );
+
+  const awsScore =
+    Number(
+      performance?.aws_score ?? 0
+    );
+
+  const dataEngineeringScore =
+    Number(
+      performance?.data_engineering_score ?? 0
+    );
+
+  const communicationScore =
+    Number(
+      performance?.communication_score ?? 0
+    );
+
+  const assessmentCount =
+    Number(
+      performance?.assessment_count ?? 0
+    );
+
+  const mockInterviewCount =
+    Number(
+      performance?.mock_interview_count ?? 0
+    );
+
+  const selectedCount =
+    Number(
+      interviewSummary?.selected_interviews ??
+        0
+    );
+
+  const scheduledCount =
+    Number(
+      interviewSummary?.scheduled_interviews ??
+        0
+    );
+
+  const completedCount =
+    Number(
+      interviewSummary?.completed_interviews ??
+        0
+    );
+
+  const totalInterviews =
+    Number(
+      interviewSummary?.total_interviews ??
+        interviews.length ??
+        0
+    );
+
+  const rejectedCount = useMemo(() => {
+    if (!interviews.length) {
+      return 0;
+    }
+
+    return interviews.filter(
+      (interview) =>
+        getStatus(interview) === "REJECTED" ||
+        getResult(interview) === "REJECTED"
+    ).length;
+  }, [interviews]);
+
+  const attendedCount = useMemo(() => {
+    if (!interviews.length) {
+      return 0;
+    }
+
+    return interviews.filter(
+      (interview) => {
+        const status =
+          getStatus(interview);
+
+        return (
+          status === "ATTENDED" ||
+          status === "COMPLETED" ||
+          status === "SELECTED"
+        );
+      }
+    ).length;
+  }, [interviews]);
+
+  const inProgressCount = useMemo(() => {
+    if (!interviews.length) {
+      return 0;
+    }
+
+    return interviews.filter(
+      (interview) =>
+        getStatus(interview) ===
+        "IN_PROGRESS"
+    ).length;
+  }, [interviews]);
+
+  // =========================================================
+  // UPCOMING INTERVIEW
+  // =========================================================
+
+  const upcomingInterview = useMemo(() => {
+    if (!interviews.length) {
+      return null;
+    }
+
+    const now = new Date();
+
+    const upcoming = interviews
+      .filter((interview) => {
+        const dateValue =
+          getInterviewDate(interview);
+
+        if (!dateValue) {
+          return false;
+        }
+
+        const date = new Date(dateValue);
+
+        if (Number.isNaN(date.getTime())) {
+          return false;
+        }
+
+        const status =
+          getStatus(interview);
+
+        return (
+          date >= now &&
+          status !== "REJECTED" &&
+          status !== "SELECTED" &&
+          status !== "COMPLETED"
+        );
+      })
+      .sort(
+        (a, b) =>
+          new Date(
+            getInterviewDate(a)
+          ) -
+          new Date(
+            getInterviewDate(b)
+          )
+      );
+
+    return upcoming[0] || null;
+  }, [interviews]);
+
+  // =========================================================
+  // FALLBACK UPCOMING INTERVIEW
+  // =========================================================
+
+  const fallbackUpcomingInterview =
+    useMemo(() => {
+      if (upcomingInterview) {
+        return upcomingInterview;
+      }
+
+      if (!interviews.length) {
+        return null;
+      }
+
+      const scheduled =
+        interviews.filter(
+          (interview) =>
+            getStatus(interview) ===
+              "SCHEDULED" ||
+            getStatus(interview) ===
+              "UPCOMING"
+        );
+
+      return scheduled[0] || null;
+    }, [
+      upcomingInterview,
+      interviews,
+    ]);
+
+  // =========================================================
+  // SKILLS
+  // =========================================================
+
+  const skills = [
     {
       name: "Python",
-      score: Number(performance.python_score ?? 0),
+      score: pythonScore,
       icon: "🐍",
     },
     {
       name: "SQL",
-      score: Number(performance.sql_score ?? 0),
+      score: sqlScore,
       icon: "🗄️",
     },
     {
       name: "PySpark",
-      score: Number(performance.pyspark_score ?? 0),
+      score: pysparkScore,
       icon: "⚡",
     },
     {
       name: "AWS",
-      score: Number(performance.aws_score ?? 0),
+      score: awsScore,
       icon: "☁️",
     },
     {
       name: "Data Engineering",
-      score: Number(
-        performance.data_engineering_score ?? 0
-      ),
-      icon: "🔧",
+      score: dataEngineeringScore,
+      icon: "⚙️",
     },
     {
       name: "Communication",
-      score: Number(
-        performance.communication_score ?? 0
-      ),
+      score: communicationScore,
       icon: "💬",
     },
   ];
+
+  const averageSkillScore =
+    skills.length
+      ? Math.round(
+          skills.reduce(
+            (total, skill) =>
+              total + skill.score,
+            0
+          ) / skills.length
+        )
+      : 0;
+
+  // =========================================================
+  // SCORE LABEL
+  // =========================================================
+
+  const getScoreLabel = (score) => {
+    if (score >= 90) {
+      return "Excellent";
+    }
+
+    if (score >= 75) {
+      return "Strong";
+    }
+
+    if (score >= 60) {
+      return "Good";
+    }
+
+    if (score >= 40) {
+      return "Developing";
+    }
+
+    return "Needs Focus";
+  };
+
+  // =========================================================
+  // STATUS COLORS
+  // =========================================================
+
+  const getStatusClass = (status) => {
+    switch (
+      status?.toUpperCase()
+    ) {
+      case "SELECTED":
+        return "status selected";
+
+      case "REJECTED":
+        return "status rejected";
+
+      case "ATTENDED":
+        return "status attended";
+
+      case "COMPLETED":
+        return "status completed";
+
+      case "IN_PROGRESS":
+        return "status progress";
+
+      default:
+        return "status scheduled";
+    }
+  };
 
   // =========================================================
   // LOADING
@@ -334,20 +495,15 @@ function StudentDashboard() {
 
   if (loading) {
     return (
-      <div style={styles.loadingPage}>
-        <div style={styles.loadingCard}>
-          <div style={styles.loadingLogo}>T</div>
-
-          <div style={styles.spinner} />
-
-          <h2 style={styles.loadingTitle}>
-            Loading your dashboard
-          </h2>
-
-          <p style={styles.loadingText}>
-            Preparing your latest student information...
-          </p>
-        </div>
+      <div className="dashboard-loading">
+        <div className="loading-spinner" />
+        <h3>
+          Loading your dashboard...
+        </h3>
+        <p>
+          Please wait while we fetch your
+          latest career information.
+        </p>
       </div>
     );
   }
@@ -358,28 +514,25 @@ function StudentDashboard() {
 
   if (error) {
     return (
-      <div style={styles.page}>
-        <div style={styles.errorCard}>
-          <div style={styles.errorIcon}>!</div>
-
-          <div>
-            <h2 style={styles.errorTitle}>
-              Unable to load dashboard
-            </h2>
-
-            <p style={styles.errorText}>
-              {error}
-            </p>
-
-            <button
-              type="button"
-              onClick={loadDashboard}
-              style={styles.primaryButton}
-            >
-              ↻ Try Again
-            </button>
-          </div>
+      <div className="dashboard-error">
+        <div className="error-icon">
+          !
         </div>
+
+        <h2>
+          Unable to load dashboard
+        </h2>
+
+        <p>
+          {error}
+        </p>
+
+        <button
+          className="retry-button"
+          onClick={loadDashboard}
+        >
+          Try Again
+        </button>
       </div>
     );
   }
@@ -389,293 +542,426 @@ function StudentDashboard() {
   // =========================================================
 
   return (
-    <div style={styles.page}>
+    <div className="student-dashboard">
 
       {/* =====================================================
-          WELCOME HERO
+          PAGE HEADER
       ===================================================== */}
 
-      <section style={styles.hero}>
+      <section className="dashboard-header">
 
-        <div style={styles.heroLeft}>
-
-          <div style={styles.eyebrow}>
-            <span style={styles.greenDot} />
+        <div>
+          <div className="eyebrow">
             STUDENT PORTAL
           </div>
 
-          <h1 style={styles.heroTitle}>
-            Welcome back,{" "}
-            <span style={styles.heroName}>
-              {student.first_name || "Student"}
-            </span>
+          <h1>
+            Welcome,{" "}
+            {student?.first_name ||
+              user?.first_name ||
+              "Student"}
             !
           </h1>
 
-          <p style={styles.heroSubtitle}>
-            Track your interviews, skills, performance and
-            career progress from one place.
+          <p>
+            Track your interviews, skills,
+            performance and career progress
+            from one place.
           </p>
-
-          <div style={styles.heroMeta}>
-
-            <div style={styles.metaItem}>
-              <span style={styles.metaIcon}>🎓</span>
-              <span>
-                {student.course_name || "Data Engineering"}
-              </span>
-            </div>
-
-            <div style={styles.metaDivider} />
-
-            <div style={styles.metaItem}>
-              <span style={styles.metaIcon}>📚</span>
-              <span>
-                Batch {student.batch_name || "-"}
-              </span>
-            </div>
-
-            <div style={styles.metaDivider} />
-
-            <div style={styles.metaItem}>
-              <span style={styles.metaIcon}>✓</span>
-              <span>
-                {student.current_status || "TRAINING"}
-              </span>
-            </div>
-
-          </div>
         </div>
 
-        <div style={styles.heroRight}>
-
-          <div style={styles.heroScoreLabel}>
-            OVERALL SCORE
+        <div className="header-profile">
+          <div className="header-avatar">
+            {getInitials()}
           </div>
 
-          <div style={styles.heroScore}>
-            {performance.overall_score ?? 0}
-            <span style={styles.heroScoreMax}>
-              /100
+          <div>
+            <strong>
+              {student?.first_name ||
+                user?.first_name ||
+                "Student"}{" "}
+              {student?.last_name ||
+                user?.last_name ||
+                ""}
+            </strong>
+
+            <span>
+              {student?.course_name ||
+                "Data Engineer"}
             </span>
           </div>
-
-          <div style={styles.heroProgress}>
-            <div
-              style={{
-                ...styles.heroProgressFill,
-                width: `${Math.min(
-                  Number(performance.overall_score ?? 0),
-                  100
-                )}%`,
-              }}
-            />
-          </div>
-
-          <div style={styles.heroScoreText}>
-            Keep building your skills 🚀
-          </div>
-
         </div>
 
       </section>
 
       {/* =====================================================
-          QUICK STATS
+          PROGRAM / STATUS
       ===================================================== */}
 
-      <section style={styles.statsGrid}>
+      <section className="profile-summary">
 
-        <StatCard
-          icon="📋"
-          label="Total Interviews"
-          value={interviews.length}
-          detail="All tracked interviews"
-          iconBackground="#e8f1ff"
-        />
+        <div className="summary-item">
+          <span className="summary-icon">
+            🎓
+          </span>
 
-        <StatCard
-          icon="📅"
-          label="Upcoming"
-          value={upcomingInterviews.length}
-          detail="Future interviews"
-          iconBackground="#e7f8ef"
-        />
+          <div>
+            <small>
+              PROGRAM
+            </small>
 
-        <StatCard
-          icon="🏆"
-          label="Selected"
-          value={selectedInterviews.length}
-          detail="Passed / selected"
-          iconBackground="#fff4d6"
-        />
+            <strong>
+              {student?.course_name ||
+                "Data Engineer"}
+            </strong>
+          </div>
+        </div>
 
-        <StatCard
-          icon="🎯"
-          label="Assessments"
-          value={performance.assessment_count ?? 0}
-          detail="Completed assessments"
-          iconBackground="#f4ebff"
-        />
+        <div className="summary-item">
+          <span className="summary-icon">
+            📚
+          </span>
+
+          <div>
+            <small>
+              BATCH
+            </small>
+
+            <strong>
+              {student?.batch_name ||
+                "--"}
+            </strong>
+          </div>
+        </div>
+
+        <div className="summary-item">
+          <span className="summary-icon">
+            ✓
+          </span>
+
+          <div>
+            <small>
+              CURRENT STATUS
+            </small>
+
+            <strong className="training-status">
+              {student?.current_status ||
+                "TRAINING"}
+            </strong>
+          </div>
+        </div>
+
+        <div className="summary-score">
+          <div className="score-circle">
+            <span>
+              {overallScore}
+            </span>
+
+            <small>
+              /100
+            </small>
+          </div>
+
+          <div>
+            <small>
+              OVERALL SCORE
+            </small>
+
+            <strong>
+              {getScoreLabel(
+                overallScore
+              )}
+            </strong>
+          </div>
+        </div>
 
       </section>
 
       {/* =====================================================
-          PROFILE + NEXT INTERVIEW
+          KPI CARDS
       ===================================================== */}
 
-      <section style={styles.twoColumn}>
+      <section className="stats-grid">
+
+        <div className="stat-card">
+          <div className="stat-icon blue">
+            💼
+          </div>
+
+          <div>
+            <span>
+              TOTAL INTERVIEWS
+            </span>
+
+            <strong>
+              {totalInterviews}
+            </strong>
+
+            <small>
+              All tracked interviews
+            </small>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon orange">
+            📅
+          </div>
+
+          <div>
+            <span>
+              UPCOMING
+            </span>
+
+            <strong>
+              {scheduledCount}
+            </strong>
+
+            <small>
+              Scheduled interviews
+            </small>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon green">
+            🏆
+          </div>
+
+          <div>
+            <span>
+              SELECTED
+            </span>
+
+            <strong>
+              {selectedCount}
+            </strong>
+
+            <small>
+              Successful outcomes
+            </small>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon purple">
+            🎯
+          </div>
+
+          <div>
+            <span>
+              ASSESSMENTS
+            </span>
+
+            <strong>
+              {assessmentCount}
+            </strong>
+
+            <small>
+              Completed assessments
+            </small>
+          </div>
+        </div>
+
+      </section>
+
+      {/* =====================================================
+          PROFILE + UPCOMING INTERVIEW
+      ===================================================== */}
+
+      <section className="two-column-grid">
 
         {/* PROFILE */}
 
-        <div style={styles.card}>
+        <div className="dashboard-card">
 
-          <div style={styles.cardHeader}>
-
+          <div className="card-header">
             <div>
-              <div style={styles.cardEyebrow}>
+              <span className="card-eyebrow">
                 PROFILE
-              </div>
+              </span>
 
-              <h2 style={styles.cardTitle}>
+              <h2>
                 Student Information
               </h2>
             </div>
 
-            <div style={styles.cardHeaderIcon}>
+            <div className="card-header-icon">
               👤
             </div>
-
           </div>
 
-          <div style={styles.profileGrid}>
+          <div className="profile-details">
 
-            <ProfileItem
-              label="Full Name"
-              value={`${student.first_name || "-"} ${
-                student.last_name || ""
-              }`}
-            />
+            <div>
+              <span>
+                Full Name
+              </span>
 
-            <ProfileItem
-              label="Email"
-              value={student.email || "-"}
-            />
+              <strong>
+                {student?.first_name ||
+                  ""}{" "}
+                {student?.last_name ||
+                  ""}
+              </strong>
+            </div>
 
-            <ProfileItem
-              label="Course"
-              value={student.course_name || "-"}
-            />
+            <div>
+              <span>
+                Email
+              </span>
 
-            <ProfileItem
-              label="Batch"
-              value={student.batch_name || "-"}
-            />
+              <strong>
+                {student?.email ||
+                  user?.email ||
+                  "Not available"}
+              </strong>
+            </div>
 
-            <ProfileItem
-              label="Qualification"
-              value={student.qualification || "-"}
-            />
+            <div>
+              <span>
+                Course
+              </span>
 
-            <ProfileItem
-              label="Graduation"
-              value={student.graduation_year || "-"}
-            />
+              <strong>
+                {student?.course_name ||
+                  "Data Engineer"}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                Batch
+              </span>
+
+              <strong>
+                {student?.batch_name ||
+                  "--"}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                Qualification
+              </span>
+
+              <strong>
+                {student?.qualification ||
+                  "--"}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                Graduation
+              </span>
+
+              <strong>
+                {student?.graduation_year ||
+                  "--"}
+              </strong>
+            </div>
 
           </div>
 
         </div>
 
-        {/* NEXT INTERVIEW */}
+        {/* UPCOMING */}
 
-        <div style={styles.card}>
+        <div className="dashboard-card upcoming-card">
 
-          <div style={styles.cardHeader}>
-
+          <div className="card-header">
             <div>
-              <div style={styles.cardEyebrow}>
+              <span className="card-eyebrow">
                 NEXT UP
-              </div>
+              </span>
 
-              <h2 style={styles.cardTitle}>
+              <h2>
                 Upcoming Interview
               </h2>
             </div>
 
-            <div style={styles.cardHeaderIcon}>
+            <div className="card-header-icon">
               📅
             </div>
-
           </div>
 
-          {nextInterview ? (
-            <div style={styles.nextInterview}>
+          {fallbackUpcomingInterview ? (
+            <div className="upcoming-content">
 
-              <div style={styles.companyBadge}>
-                {String(
-                  nextInterview.company_name ||
-                    "C"
+              <div className="company-avatar">
+                {getCompanyName(
+                  fallbackUpcomingInterview
                 )
                   .charAt(0)
                   .toUpperCase()}
               </div>
 
-              <div style={styles.nextInterviewInfo}>
+              <div className="upcoming-main">
 
-                <h3 style={styles.nextCompany}>
-                  {nextInterview.company_name ||
-                    "Company"}
+                <h3>
+                  {getCompanyName(
+                    fallbackUpcomingInterview
+                  )}
                 </h3>
 
-                <p style={styles.nextRole}>
-                  {nextInterview.role || "-"}
+                <p>
+                  {getRole(
+                    fallbackUpcomingInterview
+                  )}
                 </p>
 
-                <div style={styles.nextDetails}>
+                <div className="interview-meta">
 
                   <span>
                     📅{" "}
                     {formatDate(
-                      nextInterview.interview_date
+                      getInterviewDate(
+                        fallbackUpcomingInterview
+                      )
                     )}
                   </span>
 
-                  {nextInterview.interview_type && (
-                    <span>
-                      🎯{" "}
-                      {nextInterview.interview_type}
-                    </span>
-                  )}
+                  <span>
+                    🎯{" "}
+                    {fallbackUpcomingInterview?.interview_type ||
+                      fallbackUpcomingInterview?.round_type ||
+                      "Interview"}
+                  </span>
 
                 </div>
 
-                <span
-                  style={{
-                    ...styles.badge,
-                    ...getStatusStyle(
-                      nextInterview.status
-                    ),
-                  }}
-                >
-                  {nextInterview.status || "SCHEDULED"}
-                </span>
+              </div>
 
+              <div
+                className={getStatusClass(
+                  getStatus(
+                    fallbackUpcomingInterview
+                  )
+                )}
+              >
+                {getStatus(
+                  fallbackUpcomingInterview
+                )}
               </div>
 
             </div>
           ) : (
-            <div style={styles.emptyState}>
-              <div style={styles.emptyIcon}>
-                📭
+            <div className="empty-state">
+
+              <div>
+                📅
               </div>
 
-              <h3 style={styles.emptyTitle}>
+              <h3>
                 No upcoming interviews
               </h3>
 
-              <p style={styles.emptyText}>
-                Your next interview will appear here.
+              <p>
+                Your scheduled interviews
+                will appear here.
               </p>
+
             </div>
           )}
 
@@ -684,154 +970,252 @@ function StudentDashboard() {
       </section>
 
       {/* =====================================================
-          INTERVIEW RESULTS
+          INTERVIEW JOURNEY
       ===================================================== */}
 
-      <section style={styles.card}>
+      <section className="dashboard-card">
 
-        <div style={styles.cardHeader}>
-
+        <div className="card-header">
           <div>
-            <div style={styles.cardEyebrow}>
+            <span className="card-eyebrow">
               INTERVIEW JOURNEY
-            </div>
+            </span>
 
-            <h2 style={styles.cardTitle}>
+            <h2>
               Interview Progress
             </h2>
           </div>
 
-          <div style={styles.cardHeaderIcon}>
+          <div className="card-header-icon">
             📊
           </div>
-
         </div>
 
-        <div style={styles.interviewStats}>
+        <div className="journey-grid">
 
-          <MiniStat
-            label="Scheduled"
-            value={scheduledInterviews.length}
-            icon="⏰"
-            background="#e8f1ff"
-          />
+          <div className="journey-item">
+            <div className="journey-icon scheduled">
+              ◷
+            </div>
 
-          <MiniStat
-            label="Attended"
-            value={attendedInterviews.length}
-            icon="✓"
-            background="#e7f8ef"
-          />
+            <strong>
+              {scheduledCount}
+            </strong>
 
-          <MiniStat
-            label="Completed"
-            value={completedInterviews.length}
-            icon="✓"
-            background="#f4ebff"
-          />
+            <span>
+              Scheduled
+            </span>
+          </div>
 
-          <MiniStat
-            label="In Progress"
-            value={inProgressInterviews.length}
-            icon="↻"
-            background="#fff4d6"
-          />
+          <div className="journey-line" />
 
-          <MiniStat
-            label="Selected"
-            value={selectedInterviews.length}
-            icon="🏆"
-            background="#e7f8ef"
-          />
+          <div className="journey-item">
+            <div className="journey-icon attended">
+              ✓
+            </div>
 
-          <MiniStat
-            label="Rejected"
-            value={rejectedInterviews.length}
-            icon="×"
-            background="#fee4e2"
-          />
+            <strong>
+              {attendedCount}
+            </strong>
+
+            <span>
+              Attended
+            </span>
+          </div>
+
+          <div className="journey-line" />
+
+          <div className="journey-item">
+            <div className="journey-icon completed">
+              ✓
+            </div>
+
+            <strong>
+              {completedCount}
+            </strong>
+
+            <span>
+              Completed
+            </span>
+          </div>
+
+          <div className="journey-line" />
+
+          <div className="journey-item">
+            <div className="journey-icon progress">
+              ↻
+            </div>
+
+            <strong>
+              {inProgressCount}
+            </strong>
+
+            <span>
+              In Progress
+            </span>
+          </div>
+
+          <div className="journey-line" />
+
+          <div className="journey-item">
+            <div className="journey-icon selected">
+              ★
+            </div>
+
+            <strong>
+              {selectedCount}
+            </strong>
+
+            <span>
+              Selected
+            </span>
+          </div>
+
+          <div className="journey-line" />
+
+          <div className="journey-item">
+            <div className="journey-icon rejected">
+              ×
+            </div>
+
+            <strong>
+              {rejectedCount}
+            </strong>
+
+            <span>
+              Rejected
+            </span>
+          </div>
 
         </div>
 
       </section>
 
       {/* =====================================================
-          PERFORMANCE
+          SKILLS
       ===================================================== */}
 
-      <section style={styles.card}>
+      <section className="dashboard-card">
 
-        <div style={styles.cardHeader}>
+        <div className="card-header">
 
           <div>
-            <div style={styles.cardEyebrow}>
+            <span className="card-eyebrow">
               SKILLS & PERFORMANCE
-            </div>
+            </span>
 
-            <h2 style={styles.cardTitle}>
+            <h2>
               Your Skill Performance
             </h2>
           </div>
 
-          <div style={styles.overallPill}>
-            Overall{" "}
+          <div className="skill-overview">
             <strong>
-              {performance.overall_score ?? 0}
+              {averageSkillScore}
             </strong>
+
+            <span>
+              Average
+            </span>
           </div>
 
         </div>
 
-        <div style={styles.skillsGrid}>
+        <div className="skills-grid">
 
-          {skillScores.map((skill) => (
-            <SkillCard
-              key={skill.name}
-              name={skill.name}
-              score={skill.score}
-              icon={skill.icon}
-            />
-          ))}
+          {skills.map(
+            (skill) => (
+              <div
+                className="skill-card"
+                key={skill.name}
+              >
+
+                <div className="skill-top">
+
+                  <div className="skill-name">
+
+                    <span className="skill-icon">
+                      {skill.icon}
+                    </span>
+
+                    <strong>
+                      {skill.name}
+                    </strong>
+
+                  </div>
+
+                  <strong className="skill-score">
+                    {skill.score}
+                  </strong>
+
+                </div>
+
+                <div className="progress-track">
+
+                  <div
+                    className="progress-fill"
+                    style={{
+                      width: `${Math.min(
+                        Math.max(
+                          skill.score,
+                          0
+                        ),
+                        100
+                      )}%`,
+                    }}
+                  />
+
+                </div>
+
+                <div className="skill-bottom">
+
+                  <span>
+                    {skill.score}/100
+                  </span>
+
+                  <span>
+                    {getScoreLabel(
+                      skill.score
+                    )}
+                  </span>
+
+                </div>
+
+              </div>
+            )
+          )}
 
         </div>
 
-        <div style={styles.performanceFooter}>
+        <div className="performance-footer">
 
           <div>
-            <span style={styles.footerLabel}>
+            <span>
               Mock Interviews
             </span>
 
-            <strong style={styles.footerValue}>
-              {performance.mock_interview_count ?? 0}
+            <strong>
+              {mockInterviewCount}
             </strong>
           </div>
 
           <div>
-            <span style={styles.footerLabel}>
+            <span>
               Assessments
             </span>
 
-            <strong style={styles.footerValue}>
-              {performance.assessment_count ?? 0}
+            <strong>
+              {assessmentCount}
             </strong>
           </div>
 
           <div>
-            <span style={styles.footerLabel}>
+            <span>
               Average Skill Score
             </span>
 
-            <strong style={styles.footerValue}>
-              {skillScores.length > 0
-                ? Math.round(
-                    skillScores.reduce(
-                      (sum, skill) =>
-                        sum + skill.score,
-                      0
-                    ) / skillScores.length
-                  )
-                : 0}
+            <strong>
+              {averageSkillScore}
             </strong>
           </div>
 
@@ -843,64 +1227,50 @@ function StudentDashboard() {
           RECENT INTERVIEWS
       ===================================================== */}
 
-      <section style={styles.card}>
+      <section className="dashboard-card">
 
-        <div style={styles.cardHeader}>
+        <div className="card-header">
 
           <div>
-            <div style={styles.cardEyebrow}>
+            <span className="card-eyebrow">
               ACTIVITY
-            </div>
+            </span>
 
-            <h2 style={styles.cardTitle}>
+            <h2>
               Recent Interviews
             </h2>
           </div>
 
-          <div style={styles.cardHeaderIcon}>
+          <div className="card-header-icon">
             💼
           </div>
 
         </div>
 
-        {interviews.length === 0 ? (
-          <div style={styles.emptyState}>
-            <div style={styles.emptyIcon}>
-              📋
-            </div>
+        {interviews.length > 0 ? (
+          <div className="interview-table-wrapper">
 
-            <h3 style={styles.emptyTitle}>
-              No interviews yet
-            </h3>
-
-            <p style={styles.emptyText}>
-              Interview records will appear here.
-            </p>
-          </div>
-        ) : (
-          <div style={styles.tableWrapper}>
-
-            <table style={styles.table}>
+            <table className="interview-table">
 
               <thead>
                 <tr>
-                  <th style={styles.th}>
+                  <th>
                     COMPANY
                   </th>
 
-                  <th style={styles.th}>
+                  <th>
                     ROLE
                   </th>
 
-                  <th style={styles.th}>
+                  <th>
                     DATE
                   </th>
 
-                  <th style={styles.th}>
+                  <th>
                     STATUS
                   </th>
 
-                  <th style={styles.th}>
+                  <th>
                     RESULT
                   </th>
                 </tr>
@@ -910,76 +1280,117 @@ function StudentDashboard() {
 
                 {interviews
                   .slice(0, 5)
-                  .map((interview) => (
-                    <tr
-                      key={
-                        interview.interview_id
-                      }
-                      style={styles.tr}
-                    >
+                  .map(
+                    (
+                      interview,
+                      index
+                    ) => {
 
-                      <td style={styles.td}>
-                        <div style={styles.companyCell}>
+                      const status =
+                        getStatus(
+                          interview
+                        );
 
-                          <div style={styles.smallCompanyIcon}>
-                            {String(
-                              interview.company_name ||
-                                "C"
-                            )
-                              .charAt(0)
-                              .toUpperCase()}
-                          </div>
+                      const result =
+                        getResult(
+                          interview
+                        );
 
-                          <strong>
-                            {interview.company_name ||
-                              "-"}
-                          </strong>
-
-                        </div>
-                      </td>
-
-                      <td style={styles.td}>
-                        {interview.role || "-"}
-                      </td>
-
-                      <td style={styles.td}>
-                        {formatDate(
-                          interview.interview_date
-                        )}
-                      </td>
-
-                      <td style={styles.td}>
-                        <span
-                          style={{
-                            ...styles.badge,
-                            ...getStatusStyle(
-                              interview.status
-                            ),
-                          }}
+                      return (
+                        <tr
+                          key={
+                            interview?.interview_id ||
+                            interview?.id ||
+                            index
+                          }
                         >
-                          {interview.status || "-"}
-                        </span>
-                      </td>
 
-                      <td style={styles.td}>
-                        <span
-                          style={{
-                            ...styles.badge,
-                            ...getResultStyle(
-                              interview.result
-                            ),
-                          }}
-                        >
-                          {interview.result || "Pending"}
-                        </span>
-                      </td>
+                          <td>
+                            <div className="company-cell">
 
-                    </tr>
-                  ))}
+                              <div className="company-mini">
+                                {getCompanyName(
+                                  interview
+                                )
+                                  .charAt(0)
+                                  .toUpperCase()}
+                              </div>
+
+                              <strong>
+                                {getCompanyName(
+                                  interview
+                                )}
+                              </strong>
+
+                            </div>
+                          </td>
+
+                          <td>
+                            {getRole(
+                              interview
+                            )}
+                          </td>
+
+                          <td>
+                            {formatShortDate(
+                              getInterviewDate(
+                                interview
+                              )
+                            )}
+                          </td>
+
+                          <td>
+                            <span
+                              className={getStatusClass(
+                                status
+                              )}
+                            >
+                              {status}
+                            </span>
+                          </td>
+
+                          <td>
+                            <span
+                              className={
+                                result ===
+                                "SELECTED"
+                                  ? "result selected"
+                                  : result ===
+                                      "REJECTED"
+                                    ? "result rejected"
+                                    : "result pending"
+                              }
+                            >
+                              {result ||
+                                "PENDING"}
+                            </span>
+                          </td>
+
+                        </tr>
+                      );
+                    }
+                  )}
 
               </tbody>
 
             </table>
+
+          </div>
+        ) : (
+          <div className="empty-state">
+
+            <div>
+              💼
+            </div>
+
+            <h3>
+              No interview activity yet
+            </h3>
+
+            <p>
+              Your interview history
+              will appear here.
+            </p>
 
           </div>
         )}
@@ -990,1097 +1401,1296 @@ function StudentDashboard() {
           EMPLOYMENT
       ===================================================== */}
 
-      {employment && (
-        <section style={styles.employmentCard}>
+      <section className="dashboard-card employment-card">
 
-          <div style={styles.employmentTop}>
+        <div className="card-header">
+
+          <div>
+            <span className="card-eyebrow">
+              CAREER
+            </span>
+
+            <h2>
+              Employment
+            </h2>
+          </div>
+
+          <div className="card-header-icon">
+            💼
+          </div>
+
+        </div>
+
+        {employment.length > 0 ? (
+
+          <div className="employment-list">
+
+            {employment.map(
+              (job, index) => (
+
+                <div
+                  className="employment-item"
+                  key={
+                    job?.employment_id ||
+                    index
+                  }
+                >
+
+                  <div className="employment-company">
+                    {job?.company_name
+                      ?.charAt(0)
+                      ?.toUpperCase() ||
+                      "C"}
+                  </div>
+
+                  <div className="employment-main">
+
+                    <div className="employment-title">
+
+                      <div>
+                        <h3>
+                          {job?.company_name ||
+                            "Company"}
+                        </h3>
+
+                        <p>
+                          {job?.role ||
+                            "Role"}
+                        </p>
+                      </div>
+
+                      {job?.is_current && (
+                        <span className="current-badge">
+                          CURRENTLY EMPLOYED
+                        </span>
+                      )}
+
+                    </div>
+
+                    <div className="employment-details">
+
+                      <span>
+                        💼{" "}
+                        {job?.employment_type ||
+                          "Full-time"}
+                      </span>
+
+                      <span>
+                        📅{" "}
+                        {job?.start_date
+                          ? formatDate(
+                              job.start_date
+                            )
+                          : "--"}
+                      </span>
+
+                      <span>
+                        📍{" "}
+                        {job?.location ||
+                          "--"}
+                      </span>
+
+                      <span>
+                        ₹
+                        {job?.salary
+                          ? Number(
+                              job.salary
+                            ).toLocaleString(
+                              "en-IN"
+                            )
+                          : "--"}
+                      </span>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+              )
+            )}
+
+          </div>
+
+        ) : (
+
+          <div className="empty-state">
 
             <div>
-
-              <div style={styles.cardEyebrow}>
-                CAREER
-              </div>
-
-              <h2 style={styles.employmentTitle}>
-                Employment
-              </h2>
-
-              <p style={styles.employmentSubtitle}>
-                Your current employment information
-              </p>
-
-            </div>
-
-            <div style={styles.employmentIcon}>
               💼
             </div>
 
-          </div>
+            <h3>
+              No employment information
+            </h3>
 
-          <div style={styles.employmentGrid}>
-
-            <EmploymentItem
-              label="Company"
-              value={employment.company_name || "-"}
-            />
-
-            <EmploymentItem
-              label="Role"
-              value={employment.role || "-"}
-            />
-
-            <EmploymentItem
-              label="Employment Type"
-              value={
-                employment.employment_type || "-"
-              }
-            />
-
-            <EmploymentItem
-              label="Start Date"
-              value={formatDate(
-                employment.start_date
-              )}
-            />
-
-            <EmploymentItem
-              label="Salary"
-              value={
-                employment.salary !== null &&
-                employment.salary !== undefined
-                  ? `₹${Number(
-                      employment.salary
-                    ).toLocaleString("en-IN")}`
-                  : "Not specified"
-              }
-            />
-
-            <EmploymentItem
-              label="Location"
-              value={employment.location || "-"}
-            />
+            <p>
+              Your employment details
+              will appear here after
+              placement.
+            </p>
 
           </div>
 
-          <div style={styles.currentEmployment}>
+        )}
 
-            <span style={styles.currentDot} />
-
-            {employment.is_current
-              ? "Currently employed"
-              : "Previous employment"}
-
-          </div>
-
-        </section>
-      )}
+      </section>
 
       {/* =====================================================
           FOOTER
       ===================================================== */}
 
-      <div style={styles.footer}>
-        <span>
+      <footer className="dashboard-footer">
+
+        <strong>
           TTT NexGen Tracker
-        </span>
+        </strong>
 
         <span>
           Student Career Management Portal
         </span>
-      </div>
+
+      </footer>
+
+      {/* =====================================================
+          STYLES
+      ===================================================== */}
+
+      <style>{`
+
+        * {
+          box-sizing: border-box;
+        }
+
+        .student-dashboard {
+          width: 100%;
+          min-height: 100vh;
+          padding: 28px 32px 40px;
+          background:
+            linear-gradient(
+              180deg,
+              #f7f9fc 0%,
+              #f3f6fa 100%
+            );
+          color: #172033;
+          font-family:
+            Inter,
+            -apple-system,
+            BlinkMacSystemFont,
+            "Segoe UI",
+            sans-serif;
+        }
+
+        /* =====================================================
+           HEADER
+        ===================================================== */
+
+        .dashboard-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 24px;
+          margin-bottom: 24px;
+        }
+
+        .eyebrow,
+        .card-eyebrow {
+          display: block;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 1.3px;
+          color: #64748b;
+          margin-bottom: 7px;
+        }
+
+        .dashboard-header h1 {
+          margin: 0;
+          font-size: 30px;
+          line-height: 1.2;
+          font-weight: 800;
+          color: #111827;
+        }
+
+        .dashboard-header p {
+          margin: 8px 0 0;
+          color: #64748b;
+          font-size: 14px;
+          line-height: 1.6;
+        }
+
+        .header-profile {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 14px;
+          background: #ffffff;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          box-shadow:
+            0 4px 15px rgba(
+              15,
+              23,
+              42,
+              0.04
+            );
+        }
+
+        .header-avatar {
+          width: 42px;
+          height: 42px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 12px;
+          background: #111827;
+          color: #ffffff;
+          font-weight: 800;
+          font-size: 14px;
+        }
+
+        .header-profile strong {
+          display: block;
+          color: #111827;
+          font-size: 14px;
+        }
+
+        .header-profile span {
+          display: block;
+          margin-top: 3px;
+          color: #64748b;
+          font-size: 12px;
+        }
+
+        /* =====================================================
+           PROFILE SUMMARY
+        ===================================================== */
+
+        .profile-summary {
+          display: grid;
+          grid-template-columns:
+            1.3fr
+            0.7fr
+            1.2fr
+            1fr;
+          gap: 0;
+          background: #111827;
+          border-radius: 18px;
+          padding: 6px;
+          margin-bottom: 20px;
+          box-shadow:
+            0 12px 30px rgba(
+              15,
+              23,
+              42,
+              0.10
+            );
+        }
+
+        .summary-item,
+        .summary-score {
+          min-height: 82px;
+          display: flex;
+          align-items: center;
+          gap: 13px;
+          padding: 15px 18px;
+        }
+
+        .summary-item + .summary-item,
+        .summary-score {
+          border-left: 1px solid
+            rgba(
+              255,
+              255,
+              255,
+              0.10
+            );
+        }
+
+        .summary-icon {
+          width: 38px;
+          height: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(
+            255,
+            255,
+            255,
+            0.09
+          );
+          border-radius: 10px;
+          font-size: 17px;
+        }
+
+        .summary-item small,
+        .summary-score small {
+          display: block;
+          color: #94a3b8;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 1px;
+          margin-bottom: 5px;
+        }
+
+        .summary-item strong {
+          display: block;
+          color: #ffffff;
+          font-size: 14px;
+        }
+
+        .training-status {
+          color: #86efac !important;
+        }
+
+        .summary-score {
+          justify-content: flex-end;
+        }
+
+        .score-circle {
+          width: 52px;
+          height: 52px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 3px solid #60a5fa;
+          border-radius: 50%;
+          color: #ffffff;
+          flex-shrink: 0;
+        }
+
+        .score-circle span {
+          font-size: 16px;
+          font-weight: 800;
+        }
+
+        .score-circle small {
+          margin: 11px 0 0 1px;
+          font-size: 8px;
+        }
+
+        .summary-score strong {
+          display: block;
+          color: #93c5fd;
+          font-size: 13px;
+        }
+
+        /* =====================================================
+           STATS
+        ===================================================== */
+
+        .stats-grid {
+          display: grid;
+          grid-template-columns:
+            repeat(
+              4,
+              minmax(0, 1fr)
+            );
+          gap: 16px;
+          margin-bottom: 20px;
+        }
+
+        .stat-card {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          background: #ffffff;
+          border: 1px solid #e5e7eb;
+          border-radius: 16px;
+          padding: 18px;
+          box-shadow:
+            0 5px 18px rgba(
+              15,
+              23,
+              42,
+              0.04
+            );
+          transition:
+            transform 0.2s ease,
+            box-shadow 0.2s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-2px);
+          box-shadow:
+            0 10px 25px rgba(
+              15,
+              23,
+              42,
+              0.08
+            );
+        }
+
+        .stat-icon {
+          width: 45px;
+          height: 45px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 12px;
+          font-size: 19px;
+          flex-shrink: 0;
+        }
+
+        .stat-icon.blue {
+          background: #eff6ff;
+        }
+
+        .stat-icon.orange {
+          background: #fff7ed;
+        }
+
+        .stat-icon.green {
+          background: #f0fdf4;
+        }
+
+        .stat-icon.purple {
+          background: #faf5ff;
+        }
+
+        .stat-card span {
+          display: block;
+          color: #64748b;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.9px;
+        }
+
+        .stat-card strong {
+          display: block;
+          margin-top: 4px;
+          font-size: 24px;
+          color: #111827;
+        }
+
+        .stat-card small {
+          display: block;
+          margin-top: 2px;
+          color: #94a3b8;
+          font-size: 11px;
+        }
+
+        /* =====================================================
+           GRID
+        ===================================================== */
+
+        .two-column-grid {
+          display: grid;
+          grid-template-columns:
+            minmax(0, 1.2fr)
+            minmax(0, 0.8fr);
+          gap: 20px;
+          margin-bottom: 20px;
+        }
+
+        /* =====================================================
+           CARD
+        ===================================================== */
+
+        .dashboard-card {
+          background: #ffffff;
+          border: 1px solid #e5e7eb;
+          border-radius: 18px;
+          padding: 22px;
+          margin-bottom: 20px;
+          box-shadow:
+            0 5px 18px rgba(
+              15,
+              23,
+              42,
+              0.04
+            );
+        }
+
+        .two-column-grid
+          .dashboard-card {
+          margin-bottom: 0;
+        }
+
+        .card-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 20px;
+        }
+
+        .card-header h2 {
+          margin: 0;
+          color: #111827;
+          font-size: 18px;
+          font-weight: 800;
+        }
+
+        .card-header-icon {
+          width: 38px;
+          height: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #f8fafc;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          font-size: 16px;
+        }
+
+        /* =====================================================
+           PROFILE DETAILS
+        ===================================================== */
+
+        .profile-details {
+          display: grid;
+          grid-template-columns:
+            repeat(
+              2,
+              minmax(0, 1fr)
+            );
+          gap: 18px 28px;
+        }
+
+        .profile-details span {
+          display: block;
+          color: #94a3b8;
+          font-size: 11px;
+          margin-bottom: 5px;
+        }
+
+        .profile-details strong {
+          display: block;
+          color: #1e293b;
+          font-size: 13px;
+          overflow-wrap: anywhere;
+        }
+
+        /* =====================================================
+           UPCOMING INTERVIEW
+        ===================================================== */
+
+        .upcoming-content {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          min-height: 115px;
+        }
+
+        .company-avatar {
+          width: 52px;
+          height: 52px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #111827;
+          color: #ffffff;
+          border-radius: 14px;
+          font-size: 20px;
+          font-weight: 800;
+          flex-shrink: 0;
+        }
+
+        .upcoming-main {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .upcoming-main h3 {
+          margin: 0;
+          color: #111827;
+          font-size: 17px;
+        }
+
+        .upcoming-main p {
+          margin: 4px 0 10px;
+          color: #64748b;
+          font-size: 13px;
+        }
+
+        .interview-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+
+        .interview-meta span {
+          color: #64748b;
+          font-size: 11px;
+        }
+
+        .status,
+        .result {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 5px 9px;
+          border-radius: 999px;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+          white-space: nowrap;
+        }
+
+        .status.scheduled {
+          background: #eff6ff;
+          color: #2563eb;
+        }
+
+        .status.selected {
+          background: #f0fdf4;
+          color: #15803d;
+        }
+
+        .status.rejected {
+          background: #fef2f2;
+          color: #dc2626;
+        }
+
+        .status.attended,
+        .status.completed {
+          background: #f0fdf4;
+          color: #15803d;
+        }
+
+        .status.progress {
+          background: #fff7ed;
+          color: #c2410c;
+        }
+
+        /* =====================================================
+           INTERVIEW JOURNEY
+        ===================================================== */
+
+        .journey-grid {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          overflow-x: auto;
+          padding: 10px 0 4px;
+        }
+
+        .journey-item {
+          min-width: 90px;
+          text-align: center;
+          flex-shrink: 0;
+        }
+
+        .journey-icon {
+          width: 42px;
+          height: 42px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 8px;
+          border-radius: 50%;
+          font-size: 16px;
+          font-weight: 800;
+        }
+
+        .journey-icon.scheduled {
+          background: #eff6ff;
+          color: #2563eb;
+        }
+
+        .journey-icon.attended,
+        .journey-icon.completed {
+          background: #f0fdf4;
+          color: #15803d;
+        }
+
+        .journey-icon.progress {
+          background: #fff7ed;
+          color: #c2410c;
+        }
+
+        .journey-icon.selected {
+          background: #fefce8;
+          color: #a16207;
+        }
+
+        .journey-icon.rejected {
+          background: #fef2f2;
+          color: #dc2626;
+        }
+
+        .journey-item strong {
+          display: block;
+          color: #111827;
+          font-size: 17px;
+        }
+
+        .journey-item span {
+          display: block;
+          margin-top: 3px;
+          color: #64748b;
+          font-size: 10px;
+        }
+
+        .journey-line {
+          flex: 1;
+          min-width: 20px;
+          height: 1px;
+          background: #e2e8f0;
+        }
+
+        /* =====================================================
+           SKILLS
+        ===================================================== */
+
+        .skill-overview {
+          display: flex;
+          align-items: baseline;
+          gap: 6px;
+        }
+
+        .skill-overview strong {
+          font-size: 22px;
+          color: #111827;
+        }
+
+        .skill-overview span {
+          color: #64748b;
+          font-size: 11px;
+        }
+
+        .skills-grid {
+          display: grid;
+          grid-template-columns:
+            repeat(
+              2,
+              minmax(0, 1fr)
+            );
+          gap: 14px;
+        }
+
+        .skill-card {
+          padding: 15px;
+          background: #f8fafc;
+          border: 1px solid #edf0f4;
+          border-radius: 13px;
+        }
+
+        .skill-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .skill-name {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .skill-icon {
+          font-size: 17px;
+        }
+
+        .skill-name strong {
+          color: #334155;
+          font-size: 12px;
+        }
+
+        .skill-score {
+          color: #111827;
+          font-size: 16px;
+        }
+
+        .progress-track {
+          width: 100%;
+          height: 7px;
+          margin-top: 12px;
+          background: #e2e8f0;
+          border-radius: 999px;
+          overflow: hidden;
+        }
+
+        .progress-fill {
+          height: 100%;
+          background: #2563eb;
+          border-radius: 999px;
+          transition:
+            width 0.5s ease;
+        }
+
+        .skill-bottom {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 7px;
+          color: #94a3b8;
+          font-size: 10px;
+        }
+
+        .skill-bottom span:last-child {
+          color: #2563eb;
+          font-weight: 700;
+        }
+
+        .performance-footer {
+          display: grid;
+          grid-template-columns:
+            repeat(
+              3,
+              1fr
+            );
+          margin-top: 18px;
+          padding-top: 18px;
+          border-top: 1px solid #edf0f4;
+        }
+
+        .performance-footer div {
+          text-align: center;
+        }
+
+        .performance-footer div
+          + div {
+          border-left: 1px solid
+            #edf0f4;
+        }
+
+        .performance-footer span {
+          display: block;
+          color: #94a3b8;
+          font-size: 10px;
+        }
+
+        .performance-footer strong {
+          display: block;
+          margin-top: 4px;
+          color: #111827;
+          font-size: 18px;
+        }
+
+        /* =====================================================
+           TABLE
+        ===================================================== */
+
+        .interview-table-wrapper {
+          width: 100%;
+          overflow-x: auto;
+        }
+
+        .interview-table {
+          width: 100%;
+          border-collapse: collapse;
+          min-width: 650px;
+        }
+
+        .interview-table th {
+          padding: 11px 10px;
+          text-align: left;
+          color: #94a3b8;
+          font-size: 9px;
+          letter-spacing: 0.8px;
+          font-weight: 800;
+          border-bottom: 1px solid
+            #e5e7eb;
+        }
+
+        .interview-table td {
+          padding: 13px 10px;
+          color: #475569;
+          font-size: 12px;
+          border-bottom: 1px solid
+            #f1f5f9;
+        }
+
+        .interview-table tbody tr:last-child td {
+          border-bottom: none;
+        }
+
+        .company-cell {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+
+        .company-cell strong {
+          color: #1e293b;
+          font-size: 12px;
+        }
+
+        .company-mini {
+          width: 30px;
+          height: 30px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #111827;
+          color: #ffffff;
+          border-radius: 8px;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .result.selected {
+          background: #f0fdf4;
+          color: #15803d;
+        }
+
+        .result.rejected {
+          background: #fef2f2;
+          color: #dc2626;
+        }
+
+        .result.pending {
+          background: #f8fafc;
+          color: #64748b;
+        }
+
+        /* =====================================================
+           EMPLOYMENT
+        ===================================================== */
+
+        .employment-item {
+          display: flex;
+          gap: 15px;
+          padding: 18px;
+          background: #f8fafc;
+          border: 1px solid #edf0f4;
+          border-radius: 14px;
+        }
+
+        .employment-company {
+          width: 48px;
+          height: 48px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #111827;
+          color: #ffffff;
+          border-radius: 12px;
+          font-size: 18px;
+          font-weight: 800;
+          flex-shrink: 0;
+        }
+
+        .employment-main {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .employment-title {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 15px;
+        }
+
+        .employment-title h3 {
+          margin: 0;
+          color: #111827;
+          font-size: 15px;
+        }
+
+        .employment-title p {
+          margin: 3px 0 0;
+          color: #64748b;
+          font-size: 12px;
+        }
+
+        .current-badge {
+          padding: 5px 9px;
+          background: #f0fdf4;
+          color: #15803d;
+          border-radius: 999px;
+          font-size: 8px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+          white-space: nowrap;
+        }
+
+        .employment-details {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 18px;
+          margin-top: 13px;
+        }
+
+        .employment-details span {
+          color: #64748b;
+          font-size: 11px;
+        }
+
+        /* =====================================================
+           EMPTY / LOADING / ERROR
+        ===================================================== */
+
+        .empty-state {
+          text-align: center;
+          padding: 30px 15px;
+          color: #64748b;
+        }
+
+        .empty-state > div {
+          font-size: 28px;
+          margin-bottom: 8px;
+        }
+
+        .empty-state h3 {
+          margin: 0;
+          color: #334155;
+          font-size: 14px;
+        }
+
+        .empty-state p {
+          margin: 5px 0 0;
+          font-size: 11px;
+        }
+
+        .dashboard-loading,
+        .dashboard-error {
+          min-height: 60vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 40px;
+          text-align: center;
+          background: #f7f9fc;
+          color: #334155;
+        }
+
+        .dashboard-loading h3,
+        .dashboard-error h2 {
+          margin: 14px 0 5px;
+        }
+
+        .dashboard-loading p,
+        .dashboard-error p {
+          margin: 0;
+          color: #64748b;
+          font-size: 13px;
+        }
+
+        .loading-spinner {
+          width: 38px;
+          height: 38px;
+          border: 4px solid #e2e8f0;
+          border-top-color: #2563eb;
+          border-radius: 50%;
+          animation:
+            dashboard-spin
+            0.8s linear infinite;
+        }
+
+        @keyframes dashboard-spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        .error-icon {
+          width: 50px;
+          height: 50px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #fef2f2;
+          color: #dc2626;
+          border-radius: 50%;
+          font-size: 24px;
+          font-weight: 800;
+        }
+
+        .retry-button {
+          margin-top: 18px;
+          padding: 10px 18px;
+          border: none;
+          border-radius: 9px;
+          background: #111827;
+          color: #ffffff;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .retry-button:hover {
+          background: #1f2937;
+        }
+
+        /* =====================================================
+           FOOTER
+        ===================================================== */
+
+        .dashboard-footer {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 7px;
+          padding: 10px 0 0;
+          color: #94a3b8;
+          font-size: 10px;
+        }
+
+        .dashboard-footer strong {
+          color: #64748b;
+        }
+
+        /* =====================================================
+           RESPONSIVE
+        ===================================================== */
+
+        @media (
+          max-width: 1100px
+        ) {
+
+          .stats-grid {
+            grid-template-columns:
+              repeat(
+                2,
+                minmax(0, 1fr)
+              );
+          }
+
+          .profile-summary {
+            grid-template-columns:
+              repeat(
+                2,
+                minmax(0, 1fr)
+              );
+          }
+
+          .summary-item + .summary-item,
+          .summary-score {
+            border-left: none;
+          }
+
+          .summary-score {
+            justify-content: flex-start;
+          }
+
+          .summary-item:nth-child(
+            3
+          ),
+          .summary-score {
+            border-top: 1px solid
+              rgba(
+                255,
+                255,
+                255,
+                0.10
+              );
+          }
+
+        }
+
+        @media (
+          max-width: 850px
+        ) {
+
+          .student-dashboard {
+            padding: 20px;
+          }
+
+          .dashboard-header {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .two-column-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .two-column-grid
+            .dashboard-card {
+            margin-bottom: 20px;
+          }
+
+          .skills-grid {
+            grid-template-columns: 1fr;
+          }
+
+        }
+
+        @media (
+          max-width: 600px
+        ) {
+
+          .student-dashboard {
+            padding: 16px;
+          }
+
+          .dashboard-header h1 {
+            font-size: 24px;
+          }
+
+          .header-profile {
+            width: 100%;
+          }
+
+          .profile-summary {
+            grid-template-columns: 1fr;
+          }
+
+          .summary-item,
+          .summary-score {
+            min-height: 70px;
+            border-top: 1px solid
+              rgba(
+                255,
+                255,
+                255,
+                0.10
+              );
+          }
+
+          .summary-item:first-child {
+            border-top: none;
+          }
+
+          .stats-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .dashboard-card {
+            padding: 17px;
+          }
+
+          .profile-details {
+            grid-template-columns: 1fr;
+          }
+
+          .upcoming-content {
+            align-items: flex-start;
+            flex-wrap: wrap;
+          }
+
+          .journey-grid {
+            justify-content: flex-start;
+          }
+
+          .performance-footer {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
+
+          .performance-footer div
+            + div {
+            border-left: none;
+            border-top: 1px solid
+              #edf0f4;
+            padding-top: 12px;
+          }
+
+          .employment-title {
+            flex-direction: column;
+          }
+
+          .employment-details {
+            flex-direction: column;
+            gap: 7px;
+          }
+
+          .dashboard-footer {
+            flex-direction: column;
+          }
+
+        }
+
+      `}</style>
 
     </div>
   );
 }
-
-// =============================================================
-// STAT CARD
-// =============================================================
-
-function StatCard({
-  icon,
-  label,
-  value,
-  detail,
-  iconBackground,
-}) {
-  return (
-    <div style={styles.statCard}>
-
-      <div
-        style={{
-          ...styles.statIcon,
-          background: iconBackground,
-        }}
-      >
-        {icon}
-      </div>
-
-      <div style={styles.statContent}>
-
-        <div style={styles.statLabel}>
-          {label}
-        </div>
-
-        <div style={styles.statValue}>
-          {value}
-        </div>
-
-        <div style={styles.statDetail}>
-          {detail}
-        </div>
-
-      </div>
-
-    </div>
-  );
-}
-
-// =============================================================
-// PROFILE ITEM
-// =============================================================
-
-function ProfileItem({ label, value }) {
-  return (
-    <div style={styles.profileItem}>
-
-      <div style={styles.profileLabel}>
-        {label}
-      </div>
-
-      <div style={styles.profileValue}>
-        {value}
-      </div>
-
-    </div>
-  );
-}
-
-// =============================================================
-// MINI STAT
-// =============================================================
-
-function MiniStat({
-  label,
-  value,
-  icon,
-  background,
-}) {
-  return (
-    <div style={styles.miniStat}>
-
-      <div
-        style={{
-          ...styles.miniIcon,
-          background,
-        }}
-      >
-        {icon}
-      </div>
-
-      <div>
-
-        <div style={styles.miniLabel}>
-          {label}
-        </div>
-
-        <div style={styles.miniValue}>
-          {value}
-        </div>
-
-      </div>
-
-    </div>
-  );
-}
-
-// =============================================================
-// SKILL CARD
-// =============================================================
-
-function SkillCard({
-  name,
-  score,
-  icon,
-}) {
-  const safeScore = Math.min(
-    Math.max(Number(score) || 0, 0),
-    100
-  );
-
-  return (
-    <div style={styles.skillCard}>
-
-      <div style={styles.skillTop}>
-
-        <div style={styles.skillNameWrapper}>
-
-          <span style={styles.skillIcon}>
-            {icon}
-          </span>
-
-          <span style={styles.skillName}>
-            {name}
-          </span>
-
-        </div>
-
-        <strong style={styles.skillScore}>
-          {safeScore}
-        </strong>
-
-      </div>
-
-      <div style={styles.skillBar}>
-        <div
-          style={{
-            ...styles.skillFill,
-            width: `${safeScore}%`,
-          }}
-        />
-      </div>
-
-      <div style={styles.skillBottom}>
-        <span>
-          Performance
-        </span>
-
-        <span>
-          {safeScore >= 80
-            ? "Excellent"
-            : safeScore >= 60
-            ? "Good"
-            : "Needs focus"}
-        </span>
-      </div>
-
-    </div>
-  );
-}
-
-// =============================================================
-// EMPLOYMENT ITEM
-// =============================================================
-
-function EmploymentItem({
-  label,
-  value,
-}) {
-  return (
-    <div style={styles.employmentItem}>
-
-      <div style={styles.employmentLabel}>
-        {label}
-      </div>
-
-      <div style={styles.employmentValue}>
-        {value}
-      </div>
-
-    </div>
-  );
-}
-
-// =============================================================
-// STYLES
-// =============================================================
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    padding: "28px",
-    background:
-      "linear-gradient(180deg, #f7f9fc 0%, #f3f6fa 100%)",
-    boxSizing: "border-box",
-    color: "#101828",
-  },
-
-  // -----------------------------------------------------------
-  // LOADING
-  // -----------------------------------------------------------
-
-  loadingPage: {
-    minHeight: "70vh",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  loadingCard: {
-    textAlign: "center",
-    background: "#ffffff",
-    padding: "45px",
-    borderRadius: "20px",
-    border: "1px solid #e4e7ec",
-    boxShadow: "0 12px 40px rgba(16, 24, 40, 0.08)",
-  },
-
-  loadingLogo: {
-    width: "52px",
-    height: "52px",
-    borderRadius: "14px",
-    margin: "0 auto 20px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background:
-      "linear-gradient(135deg, #155eef, #0b4dcc)",
-    color: "#ffffff",
-    fontSize: "25px",
-    fontWeight: "800",
-  },
-
-  spinner: {
-    width: "34px",
-    height: "34px",
-    margin: "0 auto 20px",
-    borderRadius: "50%",
-    border: "4px solid #e4e7ec",
-    borderTopColor: "#155eef",
-    animation: "spin 1s linear infinite",
-  },
-
-  loadingTitle: {
-    margin: 0,
-    fontSize: "20px",
-  },
-
-  loadingText: {
-    color: "#667085",
-    marginTop: "8px",
-  },
-
-  // -----------------------------------------------------------
-  // ERROR
-  // -----------------------------------------------------------
-
-  errorCard: {
-    background: "#ffffff",
-    border: "1px solid #fecdca",
-    borderRadius: "16px",
-    padding: "25px",
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "18px",
-  },
-
-  errorIcon: {
-    width: "42px",
-    height: "42px",
-    borderRadius: "50%",
-    background: "#fee4e2",
-    color: "#b42318",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "22px",
-    fontWeight: "800",
-  },
-
-  errorTitle: {
-    margin: 0,
-    fontSize: "18px",
-  },
-
-  errorText: {
-    color: "#667085",
-    margin: "7px 0 15px",
-  },
-
-  primaryButton: {
-    border: "none",
-    background: "#155eef",
-    color: "#ffffff",
-    padding: "10px 17px",
-    borderRadius: "8px",
-    fontWeight: "700",
-    cursor: "pointer",
-  },
-
-  // -----------------------------------------------------------
-  // HERO
-  // -----------------------------------------------------------
-
-  hero: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "30px",
-    padding: "32px",
-    marginBottom: "22px",
-    borderRadius: "22px",
-    color: "#ffffff",
-    background:
-      "linear-gradient(135deg, #0b1f3a 0%, #123b6d 55%, #155eef 100%)",
-    boxShadow:
-      "0 18px 45px rgba(16, 52, 93, 0.18)",
-    overflow: "hidden",
-    position: "relative",
-  },
-
-  heroLeft: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  eyebrow: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "8px",
-    fontSize: "11px",
-    letterSpacing: "1.2px",
-    fontWeight: "800",
-    opacity: 0.85,
-    marginBottom: "12px",
-  },
-
-  greenDot: {
-    width: "7px",
-    height: "7px",
-    borderRadius: "50%",
-    background: "#32d583",
-    display: "inline-block",
-  },
-
-  heroTitle: {
-    margin: 0,
-    fontSize: "34px",
-    lineHeight: 1.2,
-    fontWeight: "800",
-  },
-
-  heroName: {
-    color: "#7cc4ff",
-  },
-
-  heroSubtitle: {
-    maxWidth: "650px",
-    color: "#d0d5dd",
-    fontSize: "15px",
-    lineHeight: 1.7,
-    margin: "13px 0 20px",
-  },
-
-  heroMeta: {
-    display: "flex",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: "14px",
-  },
-
-  metaItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "7px",
-    color: "#e4e7ec",
-    fontSize: "13px",
-    fontWeight: "600",
-  },
-
-  metaIcon: {
-    fontSize: "14px",
-  },
-
-  metaDivider: {
-    width: "1px",
-    height: "18px",
-    background: "rgba(255,255,255,0.2)",
-  },
-
-  heroRight: {
-    width: "220px",
-    flexShrink: 0,
-    alignSelf: "center",
-    padding: "20px",
-    borderRadius: "16px",
-    background: "rgba(255,255,255,0.09)",
-    border: "1px solid rgba(255,255,255,0.12)",
-    backdropFilter: "blur(10px)",
-  },
-
-  heroScoreLabel: {
-    fontSize: "10px",
-    fontWeight: "800",
-    letterSpacing: "1px",
-    color: "#cbd5e1",
-  },
-
-  heroScore: {
-    fontSize: "42px",
-    fontWeight: "800",
-    margin: "5px 0 10px",
-  },
-
-  heroScoreMax: {
-    fontSize: "14px",
-    color: "#cbd5e1",
-    fontWeight: "500",
-  },
-
-  heroProgress: {
-    height: "7px",
-    borderRadius: "10px",
-    background: "rgba(255,255,255,0.18)",
-    overflow: "hidden",
-  },
-
-  heroProgressFill: {
-    height: "100%",
-    borderRadius: "10px",
-    background: "#32d583",
-    transition: "width 0.4s ease",
-  },
-
-  heroScoreText: {
-    marginTop: "10px",
-    color: "#d0d5dd",
-    fontSize: "12px",
-  },
-
-  // -----------------------------------------------------------
-  // STAT CARDS
-  // -----------------------------------------------------------
-
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "16px",
-    marginBottom: "22px",
-  },
-
-  statCard: {
-    background: "#ffffff",
-    border: "1px solid #e4e7ec",
-    borderRadius: "16px",
-    padding: "20px",
-    display: "flex",
-    alignItems: "center",
-    gap: "15px",
-    boxShadow:
-      "0 4px 15px rgba(16, 24, 40, 0.04)",
-  },
-
-  statIcon: {
-    width: "50px",
-    height: "50px",
-    flexShrink: 0,
-    borderRadius: "13px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "22px",
-  },
-
-  statContent: {
-    minWidth: 0,
-  },
-
-  statLabel: {
-    color: "#667085",
-    fontSize: "12px",
-    fontWeight: "600",
-  },
-
-  statValue: {
-    fontSize: "27px",
-    fontWeight: "800",
-    color: "#101828",
-    margin: "3px 0",
-  },
-
-  statDetail: {
-    color: "#98a2b3",
-    fontSize: "11px",
-  },
-
-  // -----------------------------------------------------------
-  // CARDS
-  // -----------------------------------------------------------
-
-  twoColumn: {
-    display: "grid",
-    gridTemplateColumns:
-      "minmax(0, 1.15fr) minmax(0, 0.85fr)",
-    gap: "20px",
-    marginBottom: "22px",
-  },
-
-  card: {
-    background: "#ffffff",
-    border: "1px solid #e4e7ec",
-    borderRadius: "18px",
-    padding: "24px",
-    marginBottom: "22px",
-    boxShadow:
-      "0 4px 18px rgba(16, 24, 40, 0.04)",
-  },
-
-  cardHeader: {
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: "15px",
-    marginBottom: "20px",
-  },
-
-  cardEyebrow: {
-    color: "#667085",
-    fontSize: "10px",
-    fontWeight: "800",
-    letterSpacing: "1.1px",
-    marginBottom: "5px",
-  },
-
-  cardTitle: {
-    margin: 0,
-    fontSize: "20px",
-    color: "#101828",
-    fontWeight: "750",
-  },
-
-  cardHeaderIcon: {
-    width: "40px",
-    height: "40px",
-    borderRadius: "11px",
-    background: "#f2f4f7",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "18px",
-  },
-
-  // -----------------------------------------------------------
-  // PROFILE
-  // -----------------------------------------------------------
-
-  profileGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(2, minmax(0, 1fr))",
-    gap: "17px",
-  },
-
-  profileItem: {
-    padding: "13px",
-    borderRadius: "11px",
-    background: "#f8fafc",
-    border: "1px solid #eef2f6",
-  },
-
-  profileLabel: {
-    color: "#98a2b3",
-    fontSize: "10px",
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: "0.6px",
-  },
-
-  profileValue: {
-    color: "#101828",
-    fontSize: "13px",
-    fontWeight: "650",
-    marginTop: "5px",
-    wordBreak: "break-word",
-  },
-
-  // -----------------------------------------------------------
-  // NEXT INTERVIEW
-  // -----------------------------------------------------------
-
-  nextInterview: {
-    display: "flex",
-    gap: "15px",
-    padding: "18px",
-    borderRadius: "14px",
-    background:
-      "linear-gradient(135deg, #eff6ff, #f8fbff)",
-    border: "1px solid #dbeafe",
-  },
-
-  companyBadge: {
-    width: "48px",
-    height: "48px",
-    flexShrink: 0,
-    borderRadius: "13px",
-    background: "#155eef",
-    color: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "20px",
-    fontWeight: "800",
-  },
-
-  nextInterviewInfo: {
-    minWidth: 0,
-  },
-
-  nextCompany: {
-    margin: 0,
-    fontSize: "17px",
-    color: "#101828",
-  },
-
-  nextRole: {
-    margin: "4px 0 10px",
-    color: "#475467",
-    fontSize: "13px",
-    fontWeight: "600",
-  },
-
-  nextDetails: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "10px",
-    color: "#667085",
-    fontSize: "12px",
-    marginBottom: "11px",
-  },
-
-  badge: {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "5px 9px",
-    borderRadius: "999px",
-    fontSize: "10px",
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: "0.3px",
-  },
-
-  // -----------------------------------------------------------
-  // INTERVIEW PROGRESS
-  // -----------------------------------------------------------
-
-  interviewStats: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(150px, 1fr))",
-    gap: "12px",
-  },
-
-  miniStat: {
-    display: "flex",
-    alignItems: "center",
-    gap: "11px",
-    padding: "14px",
-    borderRadius: "13px",
-    background: "#f8fafc",
-    border: "1px solid #eef2f6",
-  },
-
-  miniIcon: {
-    width: "36px",
-    height: "36px",
-    borderRadius: "10px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: "800",
-    flexShrink: 0,
-  },
-
-  miniLabel: {
-    fontSize: "10px",
-    color: "#667085",
-    fontWeight: "600",
-  },
-
-  miniValue: {
-    marginTop: "2px",
-    fontSize: "20px",
-    fontWeight: "800",
-    color: "#101828",
-  },
-
-  // -----------------------------------------------------------
-  // SKILLS
-  // -----------------------------------------------------------
-
-  skillsGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(240px, 1fr))",
-    gap: "13px",
-  },
-
-  skillCard: {
-    padding: "16px",
-    borderRadius: "13px",
-    border: "1px solid #eaecf0",
-    background: "#fcfcfd",
-  },
-
-  skillTop: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: "12px",
-  },
-
-  skillNameWrapper: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-  },
-
-  skillIcon: {
-    fontSize: "17px",
-  },
-
-  skillName: {
-    fontSize: "13px",
-    fontWeight: "700",
-    color: "#344054",
-  },
-
-  skillScore: {
-    fontSize: "18px",
-    color: "#155eef",
-  },
-
-  skillBar: {
-    height: "7px",
-    background: "#eaecf0",
-    borderRadius: "10px",
-    overflow: "hidden",
-  },
-
-  skillFill: {
-    height: "100%",
-    borderRadius: "10px",
-    background:
-      "linear-gradient(90deg, #155eef, #53b1fd)",
-    transition: "width 0.4s ease",
-  },
-
-  skillBottom: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginTop: "8px",
-    color: "#98a2b3",
-    fontSize: "10px",
-  },
-
-  overallPill: {
-    background: "#e8f1ff",
-    color: "#175cd3",
-    padding: "7px 12px",
-    borderRadius: "999px",
-    fontSize: "11px",
-    fontWeight: "700",
-  },
-
-  performanceFooter: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(3, 1fr)",
-    gap: "15px",
-    marginTop: "20px",
-    paddingTop: "18px",
-    borderTop: "1px solid #eaecf0",
-  },
-
-  footerLabel: {
-    display: "block",
-    color: "#98a2b3",
-    fontSize: "10px",
-    fontWeight: "700",
-    textTransform: "uppercase",
-  },
-
-  footerValue: {
-    display: "block",
-    marginTop: "5px",
-    fontSize: "20px",
-    color: "#101828",
-  },
-
-  // -----------------------------------------------------------
-  // TABLE
-  // -----------------------------------------------------------
-
-  tableWrapper: {
-    overflowX: "auto",
-  },
-
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    minWidth: "650px",
-  },
-
-  th: {
-    textAlign: "left",
-    padding: "12px",
-    borderBottom: "1px solid #eaecf0",
-    color: "#667085",
-    fontSize: "10px",
-    fontWeight: "800",
-    letterSpacing: "0.6px",
-  },
-
-  tr: {
-    borderBottom: "1px solid #f2f4f7",
-  },
-
-  td: {
-    padding: "14px 12px",
-    color: "#475467",
-    fontSize: "12px",
-  },
-
-  companyCell: {
-    display: "flex",
-    alignItems: "center",
-    gap: "9px",
-    color: "#101828",
-  },
-
-  smallCompanyIcon: {
-    width: "30px",
-    height: "30px",
-    borderRadius: "8px",
-    background: "#e8f1ff",
-    color: "#155eef",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "12px",
-    fontWeight: "800",
-  },
-
-  // -----------------------------------------------------------
-  // EMPTY
-  // -----------------------------------------------------------
-
-  emptyState: {
-    textAlign: "center",
-    padding: "28px 15px",
-  },
-
-  emptyIcon: {
-    fontSize: "34px",
-    marginBottom: "7px",
-  },
-
-  emptyTitle: {
-    margin: 0,
-    fontSize: "15px",
-    color: "#344054",
-  },
-
-  emptyText: {
-    margin: "5px 0 0",
-    color: "#98a2b3",
-    fontSize: "12px",
-  },
-
-  // -----------------------------------------------------------
-  // EMPLOYMENT
-  // -----------------------------------------------------------
-
-  employmentCard: {
-    background:
-      "linear-gradient(135deg, #f0fdf4, #ffffff)",
-    border: "1px solid #bbf7d0",
-    borderRadius: "18px",
-    padding: "24px",
-    marginBottom: "22px",
-    boxShadow:
-      "0 4px 18px rgba(16, 185, 129, 0.06)",
-  },
-
-  employmentTop: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "15px",
-    marginBottom: "20px",
-  },
-
-  employmentTitle: {
-    margin: 0,
-    fontSize: "20px",
-    color: "#166534",
-  },
-
-  employmentSubtitle: {
-    margin: "5px 0 0",
-    color: "#667085",
-    fontSize: "12px",
-  },
-
-  employmentIcon: {
-    width: "42px",
-    height: "42px",
-    borderRadius: "11px",
-    background: "#dcfae6",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "19px",
-  },
-
-  employmentGrid: {
-    display: "grid",
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(170px, 1fr))",
-    gap: "15px",
-  },
-
-  employmentItem: {
-    padding: "13px",
-    borderRadius: "11px",
-    background: "rgba(255,255,255,0.75)",
-    border: "1px solid #dcfce7",
-  },
-
-  employmentLabel: {
-    color: "#667085",
-    fontSize: "10px",
-    fontWeight: "700",
-    textTransform: "uppercase",
-  },
-
-  employmentValue: {
-    color: "#101828",
-    fontSize: "13px",
-    fontWeight: "700",
-    marginTop: "5px",
-  },
-
-  currentEmployment: {
-    marginTop: "18px",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "7px",
-    padding: "7px 11px",
-    borderRadius: "999px",
-    background: "#dcfae6",
-    color: "#067647",
-    fontSize: "11px",
-    fontWeight: "700",
-  },
-
-  currentDot: {
-    width: "7px",
-    height: "7px",
-    borderRadius: "50%",
-    background: "#12b76a",
-  },
-
-  // -----------------------------------------------------------
-  // FOOTER
-  // -----------------------------------------------------------
-
-  footer: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "15px",
-    padding: "10px 3px 2px",
-    color: "#98a2b3",
-    fontSize: "11px",
-  },
-};
 
 export default StudentDashboard;
